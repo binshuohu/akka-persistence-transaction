@@ -1,5 +1,6 @@
 package sample.persistence.account
 
+import akka.actor.Props
 import akka.persistence.{PersistentActor, SnapshotOffer}
 import sample.persistence.domain._
 
@@ -37,12 +38,13 @@ object AccountActor {
 
   final case class MoneyUnfrozen(transactionId: Long) extends Event
 
+  def props(active: Boolean, balance: Long): Props = Props(classOf[AccountActor], active, balance)
 }
 
 final case class Transaction(transactionId: Long, from: Account, to: Account, amount: Long)
 
 
-class AccountActor extends PersistentActor {
+class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
 
   import AccountActor._
 
@@ -74,15 +76,14 @@ class AccountActor extends PersistentActor {
     }
   }
 
+  var state = AccountState(active = _active, balance = _balance, Map.empty, Map.empty)
+
   def account: String = self.path.name
 
   override val persistenceId: String = account
 
-  var state = AccountState(active = true, balance = 10000, Map.empty, Map.empty)
-
   def updateState(event: Event): Unit =
     state = state.updated(event)
-
 
   val receiveRecover: Receive = {
     case evt: Event => updateState(evt)
