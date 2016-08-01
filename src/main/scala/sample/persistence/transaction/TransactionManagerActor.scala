@@ -1,6 +1,7 @@
 package sample.persistence.transaction
 
 import akka.actor.Props
+import akka.persistence.AtLeastOnceDelivery.AtLeastOnceDeliverySnapshot
 import akka.persistence.{AtLeastOnceDelivery, PersistentActor, SnapshotOffer}
 import sample.persistence.account.AccountActor
 import sample.persistence.domain.Account
@@ -38,17 +39,18 @@ class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amou
                           from: Account = "",
                           to: Account = "",
                           amount: Long = 0L,
-                          failureReason: String = "") {
+                          failureReason: String = "",
+                          deliverySnapshot: AtLeastOnceDeliverySnapshot = getDeliverySnapshot) {
 
     def updated(event: Event): TrxnMgrState = event match {
       case TransactionInitiated(trxdId, from, to, amount) =>
-        TrxnMgrState(trxdId, from, to, amount, "")
+        TrxnMgrState(trxdId, from, to, amount, "", getDeliverySnapshot)
 
-      case FreezingMoneyFailed(_, reason) => copy(failureReason = reason)
+      case FreezingMoneyFailed(_, reason) => copy(failureReason = reason, deliverySnapshot = getDeliverySnapshot)
 
-      case AddingMoneyFailed(_, reason) => copy(failureReason = reason)
+      case AddingMoneyFailed(_, reason) => copy(failureReason = reason, deliverySnapshot = getDeliverySnapshot)
 
-      case _ => this
+      case _ => copy(deliverySnapshot = getDeliverySnapshot)
     }
   }
 
@@ -91,7 +93,6 @@ class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amou
         confirmDelivery(deliveryId)
         context.system.eventStream.publish(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
 
-
       case TransactionFinished(deliveryId) =>
         confirmDelivery(deliveryId)
         context.system.eventStream.publish(s"transaction ${state.transactionId} finished successfully")
@@ -100,7 +101,9 @@ class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amou
 
   val receiveRecover: Receive = {
     case evt: Event => updateState(evt)
-    case SnapshotOffer(_, snapshot: TrxnMgrState) => state = snapshot
+    case SnapshotOffer(_, snapshot: TrxnMgrState) =>
+      state = snapshot
+      setDeliverySnapshot(state.deliverySnapshot)
   }
 
   override def receiveCommand: Receive = {

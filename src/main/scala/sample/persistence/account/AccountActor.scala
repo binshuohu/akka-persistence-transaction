@@ -53,8 +53,6 @@ class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
                                 finishedTransactions: Map[Long, Transaction],
                                 inFlightTransaction: Map[Long, Transaction]) {
 
-    import AccountActor._
-
     def updated(event: Event): AccountState = event match {
       case MoneyFrozen(id, to, amount) =>
         val transaction = Transaction(id, account, to, amount)
