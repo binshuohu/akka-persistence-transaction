@@ -1,6 +1,6 @@
 package sample.persistence.transaction
 
-import akka.actor.Props
+import akka.actor.{ActorLogging, Props}
 import akka.persistence.AtLeastOnceDelivery.AtLeastOnceDeliverySnapshot
 import akka.persistence.{AtLeastOnceDelivery, PersistentActor, SnapshotOffer}
 import sample.persistence.account.AccountActor
@@ -25,15 +25,13 @@ case class TransactionFinished(deliveryId: Long) extends Event
 case class MoneyUnfrozen(deliveryId: Long) extends Event
 
 object TransactionManagerActor {
-  def props(transactionId: Long, from: Account, to: Account, amount: Long): Props = {
-    Props(classOf[TransactionManagerActor], transactionId, from, to, amount)
-  }
+  def props(): Props = Props(classOf[TransactionManagerActor])
 }
 
-class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amount: Long)
-  extends PersistentActor with AtLeastOnceDelivery {
+class TransactionManagerActor
+  extends PersistentActor with AtLeastOnceDelivery with ActorLogging {
 
-  override val persistenceId: String = "transaction-manager-42"
+  override val persistenceId: String = self.path.name
 
   case class TrxnMgrState(transactionId: Long = -1L,
                           from: Account = "",
@@ -57,8 +55,8 @@ class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amou
   var state = TrxnMgrState()
 
   def updateState(event: Event): Unit = {
-    def fromActor = context.actorSelection(s"/user/accounts/${state.from}")
-    def toActor = context.actorSelection(s"user/accounts/${state.to}")
+    def fromActor = context.actorSelection(s"/user/${state.from}")
+    def toActor = context.actorSelection(s"/user/${state.to}")
 
     state = state.updated(event)
     event match {
@@ -75,6 +73,7 @@ class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amou
 
       case FreezingMoneyFailed(deliveryId, reason) =>
         confirmDelivery(deliveryId)
+        log.info(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
         context.system.eventStream.publish(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
 
       case MoneyAdded(deliveryId) =>
@@ -91,16 +90,21 @@ class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amou
 
       case MoneyUnfrozen(deliveryId) =>
         confirmDelivery(deliveryId)
+        log.info(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
         context.system.eventStream.publish(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
 
       case TransactionFinished(deliveryId) =>
         confirmDelivery(deliveryId)
+        log.info(s"transaction ${state.transactionId} finished successfully")
         context.system.eventStream.publish(s"transaction ${state.transactionId} finished successfully")
     }
   }
 
   val receiveRecover: Receive = {
-    case evt: Event => updateState(evt)
+    case evt: Event =>
+      log.info(s"replay event: $evt")
+      updateState(evt)
+
     case SnapshotOffer(_, snapshot: TrxnMgrState) =>
       state = snapshot
       setDeliverySnapshot(state.deliverySnapshot)
@@ -127,10 +131,5 @@ class TransactionManagerActor(_trxdId: Long, _from: Account, _to: Account, _amou
 
     case AccountActor.ConfirmMoneyUnfrozen(deliveryId) =>
       persist(MoneyUnfrozen(deliveryId))(updateState)
-  }
-
-  override def preStart(): Unit = {
-    super.preStart()
-    self ! TransferMoney(_trxdId, _from, _to, _amount)
   }
 }

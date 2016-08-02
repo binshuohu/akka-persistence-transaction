@@ -1,6 +1,6 @@
 package sample.persistence.account
 
-import akka.actor.Props
+import akka.actor.{ActorLogging, Props}
 import akka.persistence.{PersistentActor, SnapshotOffer}
 import sample.persistence.domain._
 
@@ -44,7 +44,7 @@ object AccountActor {
 final case class Transaction(transactionId: Long, from: Account, to: Account, amount: Long)
 
 
-class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
+class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor with ActorLogging {
 
   import AccountActor._
 
@@ -89,14 +89,15 @@ class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
   }
 
   override def receiveCommand: Receive = {
-    case FreezeMoney(deliveryId, transactionId, to, amount) =>
+    case msg@FreezeMoney(deliveryId, transactionId, to, amount) =>
+      log.info(s"received $msg ")
       if (state.finishedTransactions.contains(transactionId)
         || state.inFlightTransaction.contains(transactionId)) {
         sender() ! ConfirmMoneyFrozenSucc(deliveryId)
       }
       else if (state.balance < amount) {
         sender() ! ConfirmMoneyFrozenFail(deliveryId,
-          s"insufficient balance, you have ${state.balance}, which is less than $amount")
+          s"insufficient balance, $account have ${state.balance}, which is less than $amount")
       }
       else if (!state.active) {
         sender() ! ConfirmMoneyFrozenFail(deliveryId, s"account $account is not active")
@@ -108,7 +109,8 @@ class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
         }
       }
 
-    case AddMoney(deliveryId, transactionId, from, amount) =>
+    case msg@AddMoney(deliveryId, transactionId, from, amount) =>
+      log.info(s"received $msg ")
       if (state.finishedTransactions.contains(transactionId)) {
         sender() ! ConfirmMoneyAddedSucc(deliveryId)
       }
@@ -122,7 +124,8 @@ class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
         }
       }
 
-    case FinishTransaction(deliveryId, transactionId) =>
+    case msg@FinishTransaction(deliveryId, transactionId) =>
+      log.info(s"received $msg ")
       if (state.finishedTransactions.contains(transactionId)) {
         sender() ! ConfirmTransactionFinished(deliveryId)
       }
@@ -133,7 +136,8 @@ class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
         }
       }
 
-    case UnfreezeMoney(deliveryId, transactionId) =>
+    case msg@UnfreezeMoney(deliveryId, transactionId) =>
+      log.info(s"received $msg ")
       if (!state.inFlightTransaction.contains(transactionId)) {
         sender() ! ConfirmMoneyUnfrozen(deliveryId)
       }
@@ -143,6 +147,9 @@ class AccountActor(_active: Boolean, _balance: Long) extends PersistentActor {
           sender() ! ConfirmMoneyUnfrozen(deliveryId)
         }
       }
+
+    case "print" =>
+      log.info(s"account: $account state is ${state.toString}")
   }
 
 }
