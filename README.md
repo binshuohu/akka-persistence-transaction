@@ -14,7 +14,7 @@ Well, maybe it's feasible for some cases, but in general this solution is much l
 We definitely can do better than that.
 
 OK, so how do we go about it? In the aforementioned paper, the author came up with a concept called *activity*.
-It's also known as *Process Manager Pattern* or *Saga Pattern*.
+It's also known as [*Process Manager Pattern* or *Saga Pattern*](https://msdn.microsoft.com/en-us/library/jj591569.aspx).
 This pattern is quite similar to how people cooperate to get things done in real world.
 Basically, you have a *process manager* that orchestrate the whole transaction, telling each entity involved to perform the required operation step by step.
 And in the case of one or more parties could not proceed, such as illegal operation due to unmet precondition,
@@ -62,7 +62,7 @@ Please don't get mad. I'm not quite sure how real banking system do money transf
 
 There are a few things to watch out when implementing this pattern using akka-persistence:
 
-##### 1. Use at-least-once message delivery semantic with idempotent message receiver.
+##### Use at-least-once message delivery semantic with idempotent message receiver.
 
   The world is not perfect, we can't always get exact-once message delivery, neither can we use at-most-once message delivery semantic if we want data consistency.
   The option left is obivous.
@@ -70,7 +70,7 @@ There are a few things to watch out when implementing this pattern using akka-pe
   akka-persistence provides us wi [`AtLeastOnceDelivery`](http://doc.akka.io/docs/akka/2.4/scala/persistence.html#At-Least-Once_Delivery) to achieve this.
   One thing to notice here is that `AtLeastOnceDelivery` trait its self also maintains a state to track unconfirmed messages. When we make snapshot, we must include this state as part of the actor state, using `getDeliverySnapshot` method and restore it by calling `setDeliverySnapshot` when recovering from snapshot.
 
-##### 2. Watch out where to put side effect.
+##### Watch out where to put side effect.
 
   When the actor reacts to an event, we must be careful how we perform side effect. Because events could come either from transforming an command or during recovering.
   
@@ -78,3 +78,31 @@ There are a few things to watch out when implementing this pattern using akka-pe
   In this demo, I chose not to do this, so I put this "notifying" side effect in the `receiveCommand` method.
   Why? I think down stream shouldn't be notified if `pm` recovers from disk. Whoever cares about the result of the transaction, if it didn't receive the notification the first time, maybe it can actively query against `pm` to get the result.
   I don't think there's one simple rule to follow. We always need to first figure out how our persistent actor should interact with the outside world when we make this decision.
+
+##### Some assumptions I made in this demo
+
+First of all, you must have noticed that I assumed that the actor paths of the two account were valid.
+Yes, indeed, if we successfully froze money of account `A`, but got the address of account `B` wrong, in this case, we could never deliver `AddMoney` to `B`.
+Fortunately, we can configure akka to get notification in case of delivery failure. For example, if after having tried 10 times to send `AddMoney` to `B` and it still fails, we can roll back this whole transaction.
+
+Another assumption I made is that account `A` can always process `FinishTransaction` command.
+But what if after we added money to `B`, but before sending `FinishTransaction` to `A`, `A` becomes inactive?
+Well, in this case, we have to enforce the contract with a business rule that forbid account to go inactive if it has pending transaction.
+
+And what if the node `A` resides on goes down before `A` can process `FinishTransaction`? In this case, `pm` keeps trying to deliver this command repeatedly until the actor that represents `A` is migrated to a working node. After that, everything is back on track.
+
+## Conclusion
+
+Implementing process manager is harder than it looks on paper(or screen).
+We need to carefully choose message delivery semantics due to the unreliable nature of communication in distributed environment.
+
+Handy as akka-persistence is, it still requires some scaffolding to get the whole thing started. Every functionality must be well read and understood before being put in use.
+
+Even the most trivial transaction example needs a lot of code to get right.
+I could hardly imagine how complicated it will become if more parties are involved and more business logic comes into play.
+
+On the other hand, using process manager can liberate us from using locks, which creates a lot of data contention and definitely doesn't scale well.
+
+It's difficult, but it's fun, and that's one of the reasons why we do programming, right ? :)
+
+Happy hakking.
