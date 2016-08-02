@@ -73,8 +73,6 @@ class TransactionManagerActor
 
       case FreezingMoneyFailed(deliveryId, reason) =>
         confirmDelivery(deliveryId)
-        log.info(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
-        context.system.eventStream.publish(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
 
       case MoneyAdded(deliveryId) =>
         confirmDelivery(deliveryId)
@@ -90,13 +88,9 @@ class TransactionManagerActor
 
       case MoneyUnfrozen(deliveryId) =>
         confirmDelivery(deliveryId)
-        log.info(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
-        context.system.eventStream.publish(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
 
       case TransactionFinished(deliveryId) =>
         confirmDelivery(deliveryId)
-        log.info(s"transaction ${state.transactionId} finished successfully")
-        context.system.eventStream.publish(s"transaction ${state.transactionId} finished successfully")
     }
   }
 
@@ -115,7 +109,11 @@ class TransactionManagerActor
       persist(TransactionInitiated(id, from, to, amount))(updateState)
 
     case AccountActor.ConfirmMoneyFrozenFail(deliveryId, reason) =>
-      persist(FreezingMoneyFailed(deliveryId, reason))(updateState)
+      persist(FreezingMoneyFailed(deliveryId, reason)) { e =>
+        updateState(e)
+        log.info(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
+        context.system.eventStream.publish(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
+      }
 
     case AccountActor.ConfirmMoneyFrozenSucc(deliveryId) =>
       persist(MoneyFrozen(deliveryId))(updateState)
@@ -127,9 +125,17 @@ class TransactionManagerActor
       persist(MoneyAdded(deliveryId))(updateState)
 
     case AccountActor.ConfirmTransactionFinished(deliveryId) =>
-      persist(TransactionFinished(deliveryId))(updateState)
+      persist(TransactionFinished(deliveryId)) { e=>
+        updateState(e)
+        log.info(s"transaction ${state.transactionId} finished successfully")
+        context.system.eventStream.publish(s"transaction ${state.transactionId} finished successfully")
+      }
 
     case AccountActor.ConfirmMoneyUnfrozen(deliveryId) =>
-      persist(MoneyUnfrozen(deliveryId))(updateState)
+      persist(MoneyUnfrozen(deliveryId)) { e =>
+        updateState(e)
+        log.info(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
+        context.system.eventStream.publish(s"unable to finish transaction ${state.transactionId}, reason: ${state.failureReason}")
+      }
   }
 }
